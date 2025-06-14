@@ -13,84 +13,81 @@ const peer = new Peer({
 });
 
 let myVideoStream;
-const peers = {}; // ✅ Track active peer connections
+const peers = {}; // Track active connections
 
 navigator.mediaDevices
-  .getUserMedia({
-    audio: true,
-    video: true,
-  })
+  .getUserMedia({ audio: true, video: true })
   .then((stream) => {
-    console.log("🎤 Audio tracks available:", stream.getAudioTracks());
     myVideoStream = stream;
-    addVideoStream(myVideo, stream);
+    addVideoStream(myVideo, stream, user);
 
-    // Handle incoming calls
     peer.on("call", (call) => {
-      console.log('📞 Incoming call received');
       call.answer(stream);
       const video = document.createElement("video");
 
       call.on("stream", (userVideoStream) => {
-        console.log("📡 Received user stream:", userVideoStream.getAudioTracks());
-        addVideoStream(video, userVideoStream);
+        const callerName = call.metadata?.name || "Unknown";
+        addVideoStream(video, userVideoStream, callerName);
       });
 
       call.on("close", () => {
-        console.log("📴 Call closed by remote peer");
-        video.remove(); // ✅ Remove video from DOM
+        video.parentElement.remove();
       });
 
-      peers[call.peer] = call; // ✅ Save call to cleanup later
+      peers[call.peer] = call;
     });
 
-    // When a new user connects
-    socket.on("user-connected", (userId) => {
-      console.log("🔗 A new user connected with ID:", userId);
+    socket.on("user-connected", (userId, userName) => {
       setTimeout(() => {
-        connectToNewUser(userId, stream);
+        connectToNewUser(userId, stream, userName);
       }, 1000);
     });
 
-    // When a user disconnects
     socket.on("user-disconnected", (userId) => {
-      console.log("❌ User disconnected:", userId);
       if (peers[userId]) peers[userId].close();
     });
   })
   .catch(err => {
-    console.error("❌ Failed to access media devices:", err);
-    alert("Please allow microphone & camera access.");
+    console.error("Media access error:", err);
+    alert("Please allow camera and microphone access.");
   });
 
 peer.on("open", (id) => {
-  console.log('🆔 My PeerJS ID is: ' + id);
   socket.emit("join-room", window.ROOM_ID, id, user);
 });
 
-const connectToNewUser = (userId, stream) => {
-  console.log('📞 Calling user: ' + userId);
-  const call = peer.call(userId, stream);
+const connectToNewUser = (userId, stream, userName) => {
+  const call = peer.call(userId, stream, { metadata: { name: user } });
   const video = document.createElement("video");
 
   call.on("stream", (userVideoStream) => {
-    addVideoStream(video, userVideoStream);
+    addVideoStream(video, userVideoStream, userName);
   });
 
   call.on("close", () => {
-    console.log("📴 Peer call closed");
-    video.remove();
+    video.parentElement.remove();
   });
 
   peers[userId] = call;
 };
 
-const addVideoStream = (video, stream) => {
+const addVideoStream = (video, stream, name = "You") => {
   video.srcObject = stream;
   video.addEventListener("loadedmetadata", () => {
-    video.volume = 1; // ✅ Make sure audio plays
     video.play();
-    videoGrid.append(video);
+    const wrapper = document.createElement("div");
+    wrapper.style.textAlign = "center";
+    wrapper.style.margin = "10px";
+
+    const nameLabel = document.createElement("div");
+    nameLabel.innerText = name;
+    nameLabel.style.color = "white";
+    nameLabel.style.marginTop = "5px";
+    nameLabel.style.fontSize = "14px";
+
+    wrapper.appendChild(video);
+    wrapper.appendChild(nameLabel);
+    videoGrid.append(wrapper);
   });
 };
 
@@ -119,19 +116,17 @@ stopVideo.addEventListener("click", () => {
 });
 
 inviteButton.addEventListener("click", () => {
-  prompt("📤 Share this link to invite others:", window.location.href);
+  prompt("Share this link to invite others:", window.location.href);
 });
 
 disconnectBtn.addEventListener("click", () => {
   peer.destroy();
-  socket.disconnect(); // ✅ Proper disconnect
+  socket.disconnect();
   const myVideoElement = document.querySelector("video");
-  if (myVideoElement) {
-    myVideoElement.remove();
-  }
+  if (myVideoElement) myVideoElement.remove();
   window.location.href = "https://www.google.com";
 });
 
 peer.on('error', err => {
-  console.error("⚠️ PeerJS Error:", err);
+  console.error("PeerJS Error:", err);
 });
