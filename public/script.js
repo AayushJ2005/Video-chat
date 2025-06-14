@@ -13,6 +13,7 @@ const peer = new Peer({
 });
 
 let myVideoStream;
+const peers = {}; // ✅ Track active peer connections
 
 navigator.mediaDevices
   .getUserMedia({
@@ -20,43 +21,74 @@ navigator.mediaDevices
     video: true,
   })
   .then((stream) => {
+    console.log("🎤 Audio tracks available:", stream.getAudioTracks());
     myVideoStream = stream;
     addVideoStream(myVideo, stream);
 
+    // Handle incoming calls
     peer.on("call", (call) => {
-      console.log('Someone is calling me');
+      console.log('📞 Incoming call received');
       call.answer(stream);
       const video = document.createElement("video");
+
       call.on("stream", (userVideoStream) => {
+        console.log("📡 Received user stream:", userVideoStream.getAudioTracks());
         addVideoStream(video, userVideoStream);
       });
+
+      call.on("close", () => {
+        console.log("📴 Call closed by remote peer");
+        video.remove(); // ✅ Remove video from DOM
+      });
+
+      peers[call.peer] = call; // ✅ Save call to cleanup later
     });
 
+    // When a new user connects
     socket.on("user-connected", (userId) => {
-      console.log("A new user connected with ID:", userId);
+      console.log("🔗 A new user connected with ID:", userId);
       setTimeout(() => {
         connectToNewUser(userId, stream);
-      }, 1000); // Optional slight delay for PeerJS readiness
+      }, 1000);
     });
+
+    // When a user disconnects
+    socket.on("user-disconnected", (userId) => {
+      console.log("❌ User disconnected:", userId);
+      if (peers[userId]) peers[userId].close();
+    });
+  })
+  .catch(err => {
+    console.error("❌ Failed to access media devices:", err);
+    alert("Please allow microphone & camera access.");
   });
 
 peer.on("open", (id) => {
-  console.log('My PeerJS ID is: ' + id);
+  console.log('🆔 My PeerJS ID is: ' + id);
   socket.emit("join-room", window.ROOM_ID, id, user);
 });
 
 const connectToNewUser = (userId, stream) => {
-  console.log('Calling user: ' + userId);
+  console.log('📞 Calling user: ' + userId);
   const call = peer.call(userId, stream);
   const video = document.createElement("video");
+
   call.on("stream", (userVideoStream) => {
     addVideoStream(video, userVideoStream);
   });
+
+  call.on("close", () => {
+    console.log("📴 Peer call closed");
+    video.remove();
+  });
+
+  peers[userId] = call;
 };
 
 const addVideoStream = (video, stream) => {
   video.srcObject = stream;
   video.addEventListener("loadedmetadata", () => {
+    video.volume = 1; // ✅ Make sure audio plays
     video.play();
     videoGrid.append(video);
   });
@@ -70,47 +102,36 @@ const disconnectBtn = document.querySelector("#disconnect");
 
 muteButton.addEventListener("click", () => {
   const enabled = myVideoStream.getAudioTracks()[0].enabled;
-  if (enabled) {
-    myVideoStream.getAudioTracks()[0].enabled = false;
-    muteButton.classList.toggle("background_red");
-    muteButton.innerHTML = `<i class="fas fa-microphone-slash"></i>`;
-  } else {
-    myVideoStream.getAudioTracks()[0].enabled = true;
-    muteButton.classList.toggle("background_red");
-    muteButton.innerHTML = `<i class="fas fa-microphone"></i>`;
-  }
+  myVideoStream.getAudioTracks()[0].enabled = !enabled;
+  muteButton.classList.toggle("background_red");
+  muteButton.innerHTML = enabled
+    ? `<i class="fas fa-microphone-slash"></i>`
+    : `<i class="fas fa-microphone"></i>`;
 });
 
 stopVideo.addEventListener("click", () => {
   const enabled = myVideoStream.getVideoTracks()[0].enabled;
-  if (enabled) {
-    myVideoStream.getVideoTracks()[0].enabled = false;
-    stopVideo.classList.toggle("background_red");
-    stopVideo.innerHTML = `<i class="fas fa-video-slash"></i>`;
-  } else {
-    myVideoStream.getVideoTracks()[0].enabled = true;
-    stopVideo.classList.toggle("background_red");
-    stopVideo.innerHTML = `<i class="fas fa-video"></i>`;
-  }
+  myVideoStream.getVideoTracks()[0].enabled = !enabled;
+  stopVideo.classList.toggle("background_red");
+  stopVideo.innerHTML = enabled
+    ? `<i class="fas fa-video-slash"></i>`
+    : `<i class="fas fa-video"></i>`;
 });
 
 inviteButton.addEventListener("click", () => {
-  prompt("Copy this link and send it to people you want to have a video call with:",
-    window.location.href
-  );
+  prompt("📤 Share this link to invite others:", window.location.href);
 });
 
 disconnectBtn.addEventListener("click", () => {
   peer.destroy();
+  socket.disconnect(); // ✅ Proper disconnect
   const myVideoElement = document.querySelector("video");
   if (myVideoElement) {
     myVideoElement.remove();
   }
-  socket.emit("disconnect");
   window.location.href = "https://www.google.com";
 });
 
-// Optional: Handle PeerJS errors
 peer.on('error', err => {
-  console.error("PeerJS Error:", err);
+  console.error("⚠️ PeerJS Error:", err);
 });
